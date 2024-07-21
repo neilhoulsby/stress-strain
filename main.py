@@ -1,117 +1,73 @@
-import torch
-import torch.optim as optim
-import numpy as np
-import time
-from config import hparams
-from data import get_datasets
-from model import Transformer, TransformerConfig
-from utils import forward, build_deltas, create_learning_rate_scheduler
+import argparse
+import csv
+import datetime
+from config import base_hparams
+from config import generate_sweep_configs
+from train import train
 
-def main():
-    torch.cuda.empty_cache()
-    torch.manual_seed(hparams["random_seed"])
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_loader, eval_loader = get_datasets(batch_size=hparams["batch_size"])
+def flatten_dict(d, parent_key="", sep="_"):
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
 
-    config = TransformerConfig(
-        max_len=hparams["max_len"],
-        num_layers=hparams["num_layers"],
-        hidden_dim=hparams["hidden_dim"],
-        mlp_dim=hparams["mlp_dim"],
-        num_heads=hparams["num_heads"],
-        dropout_rate=hparams["dropout_rate"],
-        attention_dropout_rate=hparams["attention_dropout_rate"],
-        causal_x=hparams["causal_x"],
-        physics_decoder=hparams["physics_decoder"],
-    )
-    model = Transformer(config).to(device)
-    model.train()
-    optimizer = optim.AdamW(
-        model.parameters(),
-        lr=hparams["learning_rate"],
-        weight_decay=hparams["weight_decay"],
-    )
-    scheduler = optim.lr_scheduler.LambdaLR(
-        optimizer,
-        create_learning_rate_scheduler(
-            warmup_steps=hparams["warmup_steps"], total_steps=hparams["total_steps"]
-        ),
-    )
 
-    metrics_all = []
-    total_steps = 0
-    tick = time.time()
+def main(args):
+    if args.single_run_save_ckpt:
+        print("Running a single training run with checkpoint saving...")
+        hparams = base_hparams.copy()
+        hparams['save_checkpoint'] = True
+        metrics, best_model_path = train(hparams)
 
-    while total_steps < hparams["total_steps"]:
-        for batch in train_loader:
-            if total_steps == 1 or (
-                total_steps % hparams["eval_freq"] == 0 and total_steps > 0
-            ):
-                summary = {k: np.mean([m[k] for m in metrics_all]) for k in metrics_all[0]}
-                summary["learning_rate"] = scheduler.get_last_lr()[0]
-                metrics_all = []
+        # Save the results
+        results = []
+        for metric in metrics:
+            flat_hparams = flatten_dict(hparams)
+            result = {**flat_hparams, **metric}
+            results.append(result)
 
-                tock = time.time()
-                steps_per_sec = hparams["eval_freq"] / (tock - tick)
-                tick = tock
+        print(f"Best model saved at: {best_model_path}")
+    else:
+        print("Running hyperparameter sweep...")
+        results = []
+        for hparams in generate_sweep_configs():
+            hparams['save_checkpoint'] = False
+            print(f"Training with hyperparameters: {hparams}")
+            metrics, _ = train(hparams)
 
-                model.eval()
+            for metric in metrics:
+                flat_hparams = flatten_dict(hparams)
+                result = {**flat_hparams, **metric}
+                results.append(result)
 
-                eval_metrics = []
-                with torch.no_grad():
-                    for eval_batch in eval_loader:
-                        eval_batch = {k: v.to(device) for k, v in eval_batch.items()}
-                        metrics = forward(
-                            model,
-                            eval_batch,
-                            hparams["deltas_loss_weight"],
-                            hparams["physics_loss_weight"],
-                        )
-                        eval_metrics.append(
-                            {
-                                k: v.detach().item() if v is not None else None
-                                for k, v in metrics.items()
-                            }
-                        )
+    # Save results to CSV (keep your existing code here)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"results_{timestamp}.csv"
 
-                eval_summary = {
-                    k: np.mean([m[k] for m in eval_metrics]) for k in eval_metrics[0]
-                }
+    if results:
+        keys = results[0].keys()
+        with open(filename, "w", newline="") as output_file:
+            dict_writer = csv.DictWriter(output_file, keys)
+            dict_writer.writeheader()
+            dict_writer.writerows(results)
 
-                print(
-                    f"Step: {total_steps:04d},\ttrain loss {summary['loss']:.3f},\t"
-                    f"train l2 {summary['l2_loss']:.3f},\ttrain aux {summary['physics_loss']:.3f},\t"
-                    f"eval loss {eval_summary['loss']:.3f},\teval l2 {eval_summary['l2_loss']:.3f},\t"
-                    f"eval aux {eval_summary['physics_loss']:.3f},\tsteps/s {steps_per_sec:.1f},\t"
-                    f"lr {summary['learning_rate']:.5f}"
-                )
+        print(f"Results saved to {filename}")
 
-                model.train()
-
-            batch = {k: v.to(device) for k, v in batch.items()}
-            optimizer.zero_grad()
-            metrics = forward(
-                model,
-                batch,
-                hparams["deltas_loss_weight"],
-                hparams["physics_loss_weight"],
-            )
-            metrics["loss"].backward()
-            optimizer.step()
-            metrics_all.append(
-                {
-                    k: v.detach().item() if v is not None else None
-                    for k, v in metrics.items()
-                }
-            )
-            scheduler.step()
-            total_steps += 1
-
-            if total_steps >= hparams["total_steps"]:
-                break
-
-    print(f"Training completed after {total_steps} steps.")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Run training with or without hyperparameter sweep"
+    )
+    parser.add_argument(
+        "--single_run_save_ckpt",
+        action="store_true",
+        help="If set, runs a single training session and saves the best checkpoint",
+    )
+    args = parser.parse_args()
+
+    main(args)

@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+
 class TransformerConfig:
     def __init__(
         self,
@@ -30,6 +31,7 @@ class TransformerConfig:
         self.causal_x = causal_x
         self.physics_decoder = physics_decoder
 
+
 class AddPositionEmbs(nn.Module):
     def __init__(self, config: TransformerConfig):
         super().__init__()
@@ -43,6 +45,7 @@ class AddPositionEmbs(nn.Module):
             inputs.ndim == 3
         ), f"Number of dimensions should be 3, but it is: {inputs.ndim}"
         return inputs + self.pos_embedding[:, : inputs.shape[1], :]
+
 
 class MlpBlock(nn.Module):
     def __init__(self, config: TransformerConfig, out_dim: int = None):
@@ -59,6 +62,7 @@ class MlpBlock(nn.Module):
         x = self.dropout(x)
         x = self.dense2(x)
         return self.dropout(x)
+
 
 class EncoderDecoder1DBlock(nn.Module):
     def __init__(self, config: TransformerConfig):
@@ -83,6 +87,7 @@ class EncoderDecoder1DBlock(nn.Module):
         z = self.ln2(x)
         z = self.mlp(z)
         return x + z
+
 
 class Decoder(nn.Module):
     def __init__(self, config: TransformerConfig):
@@ -120,6 +125,7 @@ class Decoder(nn.Module):
 
         return logits_x, logits_dx, None
 
+
 class Transformer(nn.Module):
     def __init__(self, config: TransformerConfig):
         super().__init__()
@@ -136,6 +142,7 @@ class Transformer(nn.Module):
 
         logits_x, logits_dx, aux = self.decoder(inputs, decoder_mask=decoder_mask)
         return logits_x, logits_dx, aux
+
 
 def build_deltas(x):
     dx = x[:, 1:, :] - x[:, :-1, :]

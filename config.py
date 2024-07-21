@@ -1,15 +1,14 @@
-# Configuration and hyperparameters
-
 MAX_LEN = 1001
 TEST_SIZE = 32
 TRAIN_SIZE = 200 - TEST_SIZE
+DATA_PATH = "data.npz"
 
-hparams = {
+base_hparams = {
     "random_seed": 0,
-    "model_dir": "/tmp/test",
+    "model_dir": "/home/neil/proj/stress_strain",
     "physics_decoder": False,
     "max_len": MAX_LEN,
-    "num_layers": 4,
+    "num_layers": 6,
     "hidden_dim": 16,
     "mlp_dim": 64,
     "num_heads": 2,
@@ -22,9 +21,27 @@ hparams = {
     "learning_rate": 1e-2,
     "weight_decay": 0.0,
     "warmup_steps": 100,
-    "total_steps": 1000,
-    "eval_freq": 500,
+    "total_examples": 100_000,
+    "eval_freq": 2000,
 }
 
-# Data configuration
-DATA_PATH = "data.npz"
+# Hyperparameter sweep configuration
+sweep_config = {
+    "num_layers": [6],
+    "hidden_dim": [16],
+    "learning_rate": [1e-3, 1e-2, 1e-1],
+    "dropout_rate": [0.0],
+    "total_examples": [100_000],
+}
+
+
+def generate_sweep_configs():
+    from itertools import product
+    
+    keys, values = zip(*sweep_config.items())
+    sweep_configs = [dict(zip(keys, v)) for v in product(*values)]
+    
+    for config in sweep_configs:
+        hparams = base_hparams.copy()
+        hparams.update(config)
+        yield hparams

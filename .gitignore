@@ -16,3 +16,12 @@ __pycache__/
 
 # Windows
 *Zone.Identifier
+
+# CSV files
+*.csv
+
+# PDF files
+*.pdf
+
+# Checkpoints
+*.pth
