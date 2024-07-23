@@ -146,6 +146,5 @@ class Transformer(nn.Module):
 
 def build_deltas(x):
     dx = x[:, 1:, :] - x[:, :-1, :]
-    first_dx = torch.zeros((x.shape[0], 1, x.shape[2]), dtype=x.dtype, device=x.device)
-    dx = torch.cat([first_dx, dx], dim=1)
+    dx = torch.nn.functional.pad(dx, (0, 0, 1, 0), mode='constant', value=0)
     return dx

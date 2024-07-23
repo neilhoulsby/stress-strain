@@ -4,7 +4,6 @@ from torch.utils.data import DataLoader, Dataset
 
 MAX_LEN = 1001
 TEST_SIZE = 32
-TRAIN_SIZE = 200 - TEST_SIZE
 DATA_PATH = "data.npz"
 
 class DictDataset(Dataset):
@@ -19,8 +18,8 @@ class DictDataset(Dataset):
 
 def get_datasets(
     batch_size,
+    train_size,
     max_len=MAX_LEN,
-    train_size=TRAIN_SIZE,
     test_size=TEST_SIZE,
 ):
     with open(DATA_PATH, "rb") as f:

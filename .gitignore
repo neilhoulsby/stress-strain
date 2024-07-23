@@ -2,14 +2,9 @@
 venv/
 *.pyc
 __pycache__/
-.ipynb_checkpoints/
-
-# macOS
-.DS_Store
 
 # IDEs
 .vscode/
-.idea/
 
 # Jupyter Notebooks
 .ipynb_checkpoints/
@@ -17,11 +12,15 @@ __pycache__/
 # Windows
 *Zone.Identifier
 
-# CSV files
+# Results
 *.csv
+results/
 
 # PDF files
 *.pdf
 
 # Checkpoints
 *.pth
+
+# Backup
+ptxas

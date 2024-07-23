@@ -10,11 +10,19 @@ from utils import forward, create_learning_rate_scheduler
 
 
 def train(hparams):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.cuda.empty_cache()
     torch.manual_seed(hparams["random_seed"])
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    torch.set_float32_matmul_precision("high")
+    model_path = (
+        os.path.join(hparams["model_dir"], "model.pth")
+        if hparams["model_dir"]
+        else None
+    )
 
-    train_loader, eval_loader = get_datasets(batch_size=hparams["batch_size"])
+    train_loader, eval_loader = get_datasets(
+        batch_size=hparams["batch_size"], train_size=hparams["train_size"]
+    )
 
     config = TransformerConfig(
         max_len=hparams["max_len"],
@@ -29,6 +37,8 @@ def train(hparams):
     )
     total_steps = math.ceil(hparams["total_examples"] / hparams["batch_size"])
     model = Transformer(config).to(device)
+    model = torch.compile(model, backend="inductor")
+
     optimizer = optim.AdamW(
         model.parameters(),
         lr=hparams["learning_rate"],
@@ -47,18 +57,18 @@ def train(hparams):
     all_metrics = []
     step = 0
     last_eval_step = 0
-    best_eval_loss = float('inf')
-    best_model_path = os.path.join(hparams["model_dir"], "model.pth")
+    best_eval_loss = float("inf")
     tick = time.time()
     while step < total_steps:
         for batch in train_loader:
             if step % hparams["eval_freq"] == 0 or step == total_steps - 1:
-                train_summary = {"learning_rate": scheduler.get_last_lr()[0]}
                 tock = time.time()
+                train_summary = {"learning_rate": scheduler.get_last_lr()[0]}
                 sequences_per_sec = (
-                    hparams["batch_size"] * (step - last_eval_step) / (tock - tick)
-                ) if step > 0 else -1
-                tick = tock
+                    (hparams["batch_size"] * (step - last_eval_step) / (tock - tick))
+                    if step > 0
+                    else -1
+                )
                 if step > 0:
                     train_summary.update(
                         {
@@ -92,12 +102,12 @@ def train(hparams):
 
                 metrics_summary = {
                     "step": step,
-                    "train_loss": train_summary.get('loss', -1),
-                    "train_l2_loss": train_summary.get('l2_loss', -1),
-                    "train_physics_loss": train_summary.get('physics_loss', -1),
-                    "eval_loss": eval_summary['loss'],
-                    "eval_l2_loss": eval_summary['l2_loss'],
-                    "eval_physics_loss": eval_summary['physics_loss'],
+                    "train_loss": train_summary.get("loss", -1),
+                    "train_l2_loss": train_summary.get("l2_loss", -1),
+                    "train_physics_loss": train_summary.get("physics_loss", -1),
+                    "eval_loss": eval_summary["loss"],
+                    "eval_l2_loss": eval_summary["l2_loss"],
+                    "eval_physics_loss": eval_summary["physics_loss"],
                     "sequences_per_sec": sequences_per_sec,
                 }
                 all_metrics.append(metrics_summary)
@@ -112,28 +122,34 @@ def train(hparams):
 
                 last_eval_step = step
 
-                if eval_summary['loss'] < best_eval_loss:
-                    best_eval_loss = eval_summary['loss']
-                    if hparams['save_checkpoint']:
-                        torch.save({
-                            'step': step,
-                            'model_state_dict': model.state_dict(),
-                            'optimizer_state_dict': optimizer.state_dict(),
-                            'loss': best_eval_loss,
-                        }, best_model_path)
-                        print(f"New best model saved at step {step} with eval loss: {best_eval_loss:.4f}")
+                if eval_summary["loss"] < best_eval_loss:
+                    best_eval_loss = eval_summary["loss"]
+                    if model_path:
+                        torch.save(
+                            {
+                                "step": step,
+                                "model_state_dict": model.state_dict(),
+                                "optimizer_state_dict": optimizer.state_dict(),
+                                "loss": best_eval_loss,
+                            },
+                            model_path,
+                        )
+                        print(
+                            f"New best model saved at step {step} with eval loss: {best_eval_loss:.4f}"
+                        )
 
-
+                tick = tock
                 model.train()
 
             batch = {k: v.to(device) for k, v in batch.items()}
             optimizer.zero_grad()
-            metrics = forward(
-                model,
-                batch,
-                hparams["deltas_loss_weight"],
-                hparams["physics_loss_weight"],
-            )
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                metrics = forward(
+                    model,
+                    batch,
+                    hparams["deltas_loss_weight"],
+                    hparams["physics_loss_weight"],
+                )
             metrics["loss"].backward()
             optimizer.step()
             train_metrics.append(
@@ -149,4 +165,4 @@ def train(hparams):
                 break
 
     print(f"Training completed after {total_steps} steps.")
-    return all_metrics, best_model_path
+    return all_metrics, model_path
